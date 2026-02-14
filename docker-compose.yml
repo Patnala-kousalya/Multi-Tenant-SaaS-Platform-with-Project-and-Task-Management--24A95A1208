@@ -35,16 +35,18 @@ services:
       retries: 5
 
   frontend:
-    image: node:18
+    build: .
     container_name: frontend
     working_dir: /app
     volumes:
-      - ./frontend:/app
+      - .:/app
+      - /app/node_modules
     command: npm start
     ports:
       - "3000:3000"
     environment:
-      REACT_APP_API_URL: http://backend:5000/api
+      - REACT_APP_API_URL=http://localhost:5000/api
+      - WATCHPACK_POLLING=true
     depends_on:
       backend:
         condition: service_healthy
