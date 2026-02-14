@@ -1,0 +1,8 @@
+node_modules
+build
+.git
+.zencoder
+.zenflow
+*.log
+docker-compose.yml
+backend
