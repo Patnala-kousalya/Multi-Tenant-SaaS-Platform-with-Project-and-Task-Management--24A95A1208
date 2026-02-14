@@ -107,44 +107,18 @@ exports.registerTenant = async (req, res) => {
 exports.login = async (req, res) => {
   const { email, password, tenantSubdomain } = req.body;
 
-  if (!email || !password || !tenantSubdomain) {
+  if (!email || !password) {
     return res.status(400).json({
       success: false,
-      message: "Email, password and tenantSubdomain are required",
+      message: "Email and password are required",
     });
   }
 
   try {
-    // Get tenant
-    const tenantResult = await pool.query(
-      "SELECT id, status FROM tenants WHERE subdomain = $1",
-      [tenantSubdomain]
-    );
-
-    if (tenantResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Tenant not found",
-      });
-    }
-
-    const tenant = tenantResult.rows[0];
-
-    if (tenant.status !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: "Tenant is not active",
-      });
-    }
-
-    // Get user
+    // 1. Find user by email first to check role
     const userResult = await pool.query(
-      `
-      SELECT id, email, password_hash, full_name, role, is_active
-      FROM users
-      WHERE email = $1 AND tenant_id = $2
-      `,
-      [email, tenant.id]
+      `SELECT id, tenant_id, email, password_hash, full_name, role, is_active FROM users WHERE email = $1`,
+      [email]
     );
 
     if (userResult.rows.length === 0) {
@@ -156,32 +130,76 @@ exports.login = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    if (!user.is_active) {
-      return res.status(403).json({
-        success: false,
-        message: "Account is inactive",
+    // 2. Handle super_admin login (no tenant required)
+    if (user.role === "super_admin") {
+      // Validate password
+      const passwordMatch = await bcrypt.compare(password, user.password_hash);
+      if (!passwordMatch) {
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+      }
+
+      // Generate JWT for super_admin
+      const token = jwt.sign(
+        { userId: user.id, tenantId: null, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: "24h" }
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: {
+            id: user.id,
+            email: user.email,
+            fullName: user.full_name,
+            role: user.role,
+            tenantId: null,
+          },
+          token,
+        },
       });
     }
 
-    const passwordMatch = await bcrypt.compare(
-      password,
-      user.password_hash
+    // 3. For other users, tenantSubdomain is required
+    if (!tenantSubdomain) {
+      return res.status(400).json({
+        success: false,
+        message: "tenantSubdomain is required for non-admin users",
+      });
+    }
+
+    // Get tenant and verify it matches user's tenant_id
+    const tenantResult = await pool.query(
+      "SELECT id, status FROM tenants WHERE subdomain = $1",
+      [tenantSubdomain]
     );
 
+    if (tenantResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Tenant not found" });
+    }
+
+    const tenant = tenantResult.rows[0];
+
+    if (user.tenant_id !== tenant.id) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+
+    if (tenant.status !== "active") {
+      return res.status(403).json({ success: false, message: "Tenant is not active" });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ success: false, message: "Account is inactive" });
+    }
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
     // Generate JWT
     const token = jwt.sign(
-      {
-        userId: user.id,
-        tenantId: tenant.id,
-        role: user.role,
-      },
+      { userId: user.id, tenantId: tenant.id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -197,7 +215,6 @@ exports.login = async (req, res) => {
           tenantId: tenant.id,
         },
         token,
-        expiresIn: 86400,
       },
     });
   } catch (error) {
