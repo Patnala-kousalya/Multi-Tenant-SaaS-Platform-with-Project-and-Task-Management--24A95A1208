@@ -61,6 +61,11 @@ docker-compose up -d
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:5000
 - Health Check: http://localhost:5000/api/health
+## Backend URL
+http://localhost:5000
+
+## Frontend URL
+http://localhost:3000
 
 ---
 
