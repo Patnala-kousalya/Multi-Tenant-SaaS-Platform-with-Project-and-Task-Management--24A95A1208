@@ -28,14 +28,32 @@ async function runMigrationsAndSeeds() {
     const migrations = fs.readdirSync(migrationsDir).sort();
     for (const file of migrations) {
       console.log(`▶ Running migration: ${file}`);
-      await runSqlFile(path.join(migrationsDir, file));
+      try {
+        await runSqlFile(path.join(migrationsDir, file));
+      } catch (migrationErr) {
+        // If it's "already exists" error, we can ignore it
+        if (migrationErr.code === '42P07' || migrationErr.code === '42710' || migrationErr.code === '23505') {
+          console.log(`ℹ Migration ${file} already applied or skipped (object exists)`);
+        } else {
+          throw migrationErr;
+        }
+      }
     }
 
     // Run seeds
     const seeds = fs.readdirSync(seedsDir).sort();
     for (const file of seeds) {
       console.log(`▶ Running seed: ${file}`);
-      await runSqlFile(path.join(seedsDir, file));
+      try {
+        await runSqlFile(path.join(seedsDir, file));
+      } catch (seedErr) {
+        // Ignore unique constraint violations in seeds
+        if (seedErr.code === '23505') {
+          console.log(`ℹ Seed ${file} already applied (unique constraint violation)`);
+        } else {
+          throw seedErr;
+        }
+      }
     }
 
     console.log("✅ Migrations & seeds completed");
